@@ -1,4 +1,4 @@
-[[bpmnConstructs]]
+﻿[[bpmnConstructs]]
 
 == BPMN 2.0 Constructs
 
@@ -88,10 +88,10 @@ It accepts as value either static values link:$$http://en.wikipedia.org/wiki/ISO
 </timerEventDefinition>
 ----
 
-If booth are specified then the endDate specified as attribute will be used by the system.
- 
+If both are specified then the endDate specified as attribute will be used by the system.
+
  Currently only the _BoundaryTimerEvents_ and _CatchTimerEvent_ supports _EndDate_ functionality.
- 
+
 Additionally, you can specify time cycle using cron expressions, example below shows trigger firing every 5 minutes, starting at full hour:
 
 
@@ -831,6 +831,34 @@ Note that the _errorRef_ must comply with the BPMN 2.0 schema, and must be a val
 
 [[bpmnCancelEndEvent]]
 
+==== Terminate End Event
+
+===== Description
+
+When a _terminate end event_ is reached, the current process instance or sub-process will be terminated. Conceptually, when an execution arrives in a terminate end event, the first _scope_ (process or sub-process) will be determined and ended. Note that in BPMN 2.0, a sub-process can be an embedded sub-process, call activity, event sub-process or transaction sub-process. This rule applies in general: when for example there is a multi-instance call activity or embedded subprocess, only that instance will be ended, the other instances and the process instance are not affected.
+
+There is an optional attribute _terminateAll_ that can be added. When _true_, regardless of the placement of the terminate end event in the process definition and regardless of being in a sub-process (even nested), the (root) process instance will be terminated.
+
+===== Graphical notation
+
+A cancel end event visualized as a typical end event (circle with thick outline), with a full black circle inside.
+
+image::images/bpmn.terminate.end.event.png[align="center"]
+
+
+===== XML representation
+
+A terminate end event is represented as an end event, with a _terminateEventDefinition_ child element.
+
+Note that the _terminateAll_ attribute is optional (and _false_ by default).
+
+[source,xml,linenums]
+----
+<endEvent id="myEndEvent >
+  <terminateEventDefinition activiti:terminateAll="true"></terminateEventDefinition>
+</endEvent>
+----
+
 
 ==== Cancel End Event
 
@@ -962,7 +990,7 @@ Since BPMN 2.0 there is the difference between the interrupting and non interrup
 ===== Known issue with boundary events
 
 
-There is a known issue regarding concurrency when using boundary events of any type. Currently, it is not possible to have multiple outgoing sequence flow attached to a boundary event (see issue link:$$http://jira.codehaus.org/browse/ACT-47$$[ACT-47]). A solution to this problem is to use one outgoing sequence flow that goes to a parallel gateway.
+There is a known issue regarding concurrency when using boundary events of any type. Currently, it is not possible to have multiple outgoing sequence flow attached to a boundary event (see issue link:$$https://activiti.atlassian.net/browse/ACT-47$$[ACT-47]). A solution to this problem is to use one outgoing sequence flow that goes to a parallel gateway.
 
 image::images/bpmn.known.issue.boundary.event.png[align="center"]
 
@@ -1176,9 +1204,9 @@ An attached intermediate _catching_ cancel on the boundary of a transaction subp
 ===== Graphical notation
 
 
-A cancel boundary event is visualized as a typical intermediate event (Circle with smaller circle inside) on the boundary, with the cancel icon inside. The cancel icon is white (unfilled), to indicate the _catching_
+A cancel boundary event is visualized as a typical intermediate event (Circle with smaller circle inside) on the boundary, with the cancel icon inside. The cancel icon is white (unfilled), to indicate the _catching_ semantics.
 
-image::images/bpmn.boundary.cancel.event.png[align="center"]	 semantics.
+image::images/bpmn.boundary.cancel.event.png[align="center"]
 
 
 
@@ -2890,7 +2918,7 @@ This mechanism should be used *only for business faults* that shall be handled b
 
 ====== Exception mapping
 
-It is also possible to directly map a java exception to business exception by using +mapException+ extention. Single mapping is the simplest form:
+It is also possible to directly map a java exception to business exception by using +mapException+ extension. Single mapping is the simplest form:
 [source,xml,linenums]
 ----
 <serviceTask id="servicetask1" name="Service Task" activiti:class="...">
@@ -2931,7 +2959,7 @@ The most generic mapping is a default map. Default map is a map with no class. I
 </serviceTask>
 ----
 
-The mappings are checked in order, from top to buttom and the first found match will be followed, except for the default map. Default map is selected only after all maps are unsuccessfully checked.
+The mappings are checked in order, from top to bottom and the first found match will be followed, except for the default map. Default map is selected only after all maps are unsuccessfully checked.
 Only the first map with no class will be considered as default map. +includeChildExceptions+ is ignored for default Map.
 
 
@@ -3637,6 +3665,18 @@ The above table explains how Activiti variables are going to be transferred to C
 
 |===============
 
+===== Returning back the variables
+What is mentioned above about passing variables, only holds for start side of the variable transfer, in both directions from Camel to Activiti and vice versa. +
+It is important to notice that because of special non blocking behavior of Activiti, variables are not automatically returned back from Activiti to Camel.
+For that to happen, a special syntax is available. There can be one or more parameters in Camel route URL in format of +var.return.someVariableName+.
+All variables having a name equal to one of these parameters without +var.return+ part, will be considered as output variables and will be copied back as camel properties with the same names. +
+For example in a route like:
+----
+from("direct:start").to("activiti:process?var.return.exampleVar").to("mock:result");
+----
+
+Activiti variable with the name of +exampleVar+ will be considered as output variable and will be copied back as a property in camel with the same name.
+
 
 [[bpmnCamelTaskAsyncPingPong]]
 
@@ -4228,6 +4268,60 @@ Here, all instances of the subprocess will be destroyed when the timer fires, re
 
 [[bpmnCompensationHandlers]]
 
+===== Multi instance and execution listeners
+
+(Valid for Activiti 5.18 and up)
+
+There is a caveat when using execution listeners in combination with multi instance. Take for example the following snippet of BPMN 2.0 xml, which is defined on the same level as the _multiInstanceLoopCharacteristics_ xml element is set:
+
+[source,xml,linenums]
+----
+<extensionElements>
+    <activiti:executionListener event="start" class="org.activiti.MyStartListener"/>
+		<activiti:executionListener event="end" class="org.activiti.MyEndListener"/>
+</extensionElements>
+----
+
+For a normal BPMN activity, there would be an invocation of these listeners when the activity is started and ended.
+
+However, when the activity is multi instance, the behavior is different:
+
+* When the multi instance activity is entered, before any of the _inner_ activities is executed, a start event is thrown. The _loopCounter_ variable is not yet set (is null).
+* For each of the actual activities visited, a start event is thrown. The _loopCounter_ variable is set.
+
+The same reasoning applies for the end event:
+
+* When the actual activity is left, an end even is thrown. The _loopCounter_ variable is set.
+* When the multi instance activity has finished as a whole, an end event is thrown. The _loopCounter_ variable is not set.
+
+For example:
+
+[source,xml,linenums]
+----
+<subProcess id="subprocess1" name="Sub Process">
+  <extensionElements>
+    <activiti:executionListener event="start" class="org.activiti.MyStartListener"/>
+    <activiti:executionListener event="end" class="org.activiti.MyEndListener"/>
+  </extensionElements>
+  <multiInstanceLoopCharacteristics isSequential="false">
+    <loopDataInputRef>assignees</loopDataInputRef>
+    <inputDataItem name="assignee"></inputDataItem>
+  </multiInstanceLoopCharacteristics>
+  <startEvent id="startevent2" name="Start"></startEvent>
+  <endEvent id="endevent2" name="End"></endEvent>
+  <sequenceFlow id="flow3" name="" sourceRef="startevent2" targetRef="endevent2"></sequenceFlow>
+</subProcess>
+----
+
+In this example, suppose the _assignees_ list has three items. The following happens at runtime:
+
+* A start event is thrown for the multi instance as a whole. The _start_ execution listener is invoked. The _loopCounter_ nor the _assignee_ variable will not be set (i.e. they will be null).
+* A start event is thrown for each activity instance. The _start_ execution listener is invoked three times. The _loopCounter_ nor the _assignee_ variable will be set (i.e. different from null).
+* So in total, the start execution listener is invoked four times.
+
+Note that the same applies when the _multiInstanceLoopCharacteristics_ are defined on something else than a subprocess too. For example in case the example above would be a simple userTask, the same reasoning still applies.
+
+
 
 ==== Compensation Handlers
 
@@ -4562,7 +4656,7 @@ You can pass process variables to the sub process and vice versa. The data is co
 <callActivity id="callSubProcess" calledElement="checkCreditProcess" >
   <extensionElements>
 	  <activiti:in source="someVariableInMainProcess" target="nameOfVariableInSubProcess" />
-	  <activiti:out source="someVariableInSubProcss" target="nameOfVariableInMainProcess" />
+	  <activiti:out source="someVariableInSubProcess" target="nameOfVariableInMainProcess" />
   </extensionElements>
 </callActivity>
 ----
@@ -4591,7 +4685,7 @@ So in the end z = y+5 = x+5+5
 
 The following process diagram shows a simple handling of an order. Since the checking of the customer's credit could be common to many other processes, the _check credit step_ is modeled here as a call activity.
 
-image::images/image::images/bpmn.conditional.sequence.flow.png[align="center"][align="center"]Ω
+image::images/bpmn.call.activity.super.process.png[align="center"]
 
 The process looks as follows:
 

@@ -51,6 +51,8 @@ private static Logger log = LoggerFactory.getLogger(DefaultAsyncJobExecutor.clas
   protected AcquireTimerJobsRunnable timerJobRunnable;
   protected AcquireAsyncJobsDueRunnable asyncJobsDueRunnable;
   
+  protected ExecuteAsyncRunnableFactory executeAsyncRunnableFactory;
+  
   protected boolean isAutoActivate = false;
   protected boolean isActive = false;
   
@@ -62,6 +64,7 @@ private static Logger log = LoggerFactory.getLogger(DefaultAsyncJobExecutor.clas
   protected String lockOwner = UUID.randomUUID().toString();
   protected int timerLockTimeInMillis = 5 * 60 * 1000;
   protected int asyncJobLockTimeInMillis = 5 * 60 * 1000;
+  protected int retryWaitTimeInMillis = 500;
   
   // Job queue used when async executor is not yet started and jobs are already added.
   // This is mainly used for testing purpose.
@@ -70,8 +73,14 @@ private static Logger log = LoggerFactory.getLogger(DefaultAsyncJobExecutor.clas
   protected CommandExecutor commandExecutor;
   
   public void executeAsyncJob(JobEntity job) {
+  	Runnable runnable = null;
     if (isActive) {
-    	executorService.execute(new ExecuteAsyncRunnable(job, commandExecutor));
+    	if (executeAsyncRunnableFactory == null) {
+    		runnable = new ExecuteAsyncRunnable(job, commandExecutor);
+    	} else {
+    		runnable = executeAsyncRunnableFactory.createExecuteAsyncRunnable(job, commandExecutor);
+    	}
+    	executorService.execute(runnable);
     } else {
       temporaryJobQueue.add(job);
     }
@@ -327,4 +336,21 @@ private static Logger log = LoggerFactory.getLogger(DefaultAsyncJobExecutor.clas
   public void setAsyncJobsDueRunnable(AcquireAsyncJobsDueRunnable asyncJobsDueRunnable) {
     this.asyncJobsDueRunnable = asyncJobsDueRunnable;
   }
+
+	public int getRetryWaitTimeInMillis() {
+		return retryWaitTimeInMillis;
+	}
+
+	public void setRetryWaitTimeInMillis(int retryWaitTimeInMillis) {
+		this.retryWaitTimeInMillis = retryWaitTimeInMillis;
+	}
+
+	public ExecuteAsyncRunnableFactory getExecuteAsyncRunnableFactory() {
+		return executeAsyncRunnableFactory;
+	}
+
+	public void setExecuteAsyncRunnableFactory(ExecuteAsyncRunnableFactory executeAsyncRunnableFactory) {
+		this.executeAsyncRunnableFactory = executeAsyncRunnableFactory;
+	}
+
 }

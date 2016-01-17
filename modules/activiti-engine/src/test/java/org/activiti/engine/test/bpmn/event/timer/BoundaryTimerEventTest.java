@@ -13,9 +13,11 @@
 
 package org.activiti.engine.test.bpmn.event.timer;
 
+import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.activiti.engine.delegate.DelegateExecution;
 import org.activiti.engine.delegate.ExecutionListener;
@@ -125,6 +127,31 @@ public class BoundaryTimerEventTest extends PluggableActivitiTestCase {
     assertProcessEnded(pi.getId());
   }
   
+
+  @Deployment
+  public void testNullExpressionOnTimer(){
+	  
+    HashMap<String, Object> variables = new HashMap<String, Object>();
+    variables.put("duration", null);
+    
+    // After process start, there should be a timer created
+    ProcessInstance pi = runtimeService.startProcessInstanceByKey("testNullExpressionOnTimer", variables);
+
+    //NO job scheduled as null expression set
+    JobQuery jobQuery = managementService.createJobQuery().processInstanceId(pi.getId());
+    List<Job> jobs = jobQuery.list();
+    assertEquals(0, jobs.size());
+
+    // which means the process is still running waiting for human task input.
+    ProcessInstance processInstance = processEngine
+    	      .getRuntimeService()
+    	      .createProcessInstanceQuery()
+    	      .processInstanceId(pi.getId())
+    	      .singleResult();
+    assertNotNull(processInstance);
+  }
+  
+  
   @Deployment
   public void testTimerInSingleTransactionProcess() {
     // make sure that if a PI completes in single transaction, JobEntities associated with the execution are deleted.
@@ -147,5 +174,38 @@ public class BoundaryTimerEventTest extends PluggableActivitiTestCase {
     assertEquals(1, managementService.createJobQuery().count());
     assertEquals(1, taskService.createTaskQuery().count());
   }
+  
+  @Deployment
+	public void testInfiniteRepeatingTimer() throws Exception {
+		
+		SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyyy.MM.dd hh:mm");
+		Date currentTime = simpleDateFormat.parse("2015.10.01 11:01");
+		processEngineConfiguration.getClock().setCurrentTime(currentTime);
+		
+		Map<String, Object> vars = new HashMap<String, Object>();
+		vars.put("timerString", "R/2015-10-01T11:00:00/PT24H");
+		runtimeService.startProcessInstanceByKey("testTimerErrors", vars);
+		
+		long twentyFourHours = 24L * 60L * 60L * 1000L; 
+
+		Date previousDueDate = null;
+		
+		// Move clock, job should fire
+		for (int i=0; i<30; i++) {
+			Job job = managementService.createJobQuery().singleResult();
+			
+			// Verify due date
+			if (previousDueDate != null) {
+				assertTrue(job.getDuedate().getTime() - previousDueDate.getTime() >= twentyFourHours);
+			}
+			previousDueDate = job.getDuedate();
+			
+			currentTime = new Date(currentTime.getTime() + twentyFourHours + (60 * 1000));
+			processEngineConfiguration.getClock().setCurrentTime(currentTime);
+			managementService.executeJob(managementService.createJobQuery().executable().singleResult().getId());
+		}
+		
+	}
+
 
 }
